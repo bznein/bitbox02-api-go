@@ -42,22 +42,22 @@ type taprootInternal struct {
 	*psbt.TaprootBip32Derivation
 }
 
-type ourKey struct {
-	segwit          *psbt.Bip32Derivation
-	taprootInternal *taprootInternal
-	taprootScript   *taprootScript
+type OurKey struct {
+	Segwit          *psbt.Bip32Derivation
+	TaprootInternal *taprootInternal
+	TaprootScript   *taprootScript
 }
 
 // bip352Pubkey returns the pubkey used for silent payments:
 // - 33 byte compressed public key for p2pkh, p2wpkh, p2wpkh-p2sh.
 // - 32 byte x-only public key for p2tr
 // See https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki#user-content-Inputs_For_Shared_Secret_Derivation.
-func (key *ourKey) bip352Pubkey() ([]byte, error) {
-	if key.segwit != nil {
-		return key.segwit.PubKey, nil
+func (key *OurKey) bip352Pubkey() ([]byte, error) {
+	if key.Segwit != nil {
+		return key.Segwit.PubKey, nil
 	}
-	if key.taprootInternal != nil {
-		pubKey, err := schnorr.ParsePubKey(key.taprootInternal.XOnlyPubKey)
+	if key.TaprootInternal != nil {
+		pubKey, err := schnorr.ParsePubKey(key.TaprootInternal.XOnlyPubKey)
 		if err != nil {
 			return nil, err
 		}
@@ -67,50 +67,50 @@ func (key *ourKey) bip352Pubkey() ([]byte, error) {
 	return nil, errp.New("unsupported script type for silent payments")
 }
 
-func (key *ourKey) keypath() []uint32 {
-	if key.segwit != nil {
-		return key.segwit.Bip32Path
+func (key *OurKey) keypath() []uint32 {
+	if key.Segwit != nil {
+		return key.Segwit.Bip32Path
 	}
-	if key.taprootInternal != nil {
-		return key.taprootInternal.Bip32Path
+	if key.TaprootInternal != nil {
+		return key.TaprootInternal.Bip32Path
 	}
-	return key.taprootScript.Bip32Path
+	return key.TaprootScript.Bip32Path
 }
 
-type psbtInputInfo struct {
+type PsbtInputInfo struct {
 	psbt.PInput
 }
 
-func (i psbtInputInfo) GetTapInternalKey() []byte {
+func (i PsbtInputInfo) GetTapInternalKey() []byte {
 	return i.TaprootInternalKey
 }
 
-func (i psbtInputInfo) GetBip32Derivation() []*psbt.Bip32Derivation {
+func (i PsbtInputInfo) GetBip32Derivation() []*psbt.Bip32Derivation {
 	return i.Bip32Derivation
 }
 
-func (i psbtInputInfo) GetTaprootBip32Derivation() []*psbt.TaprootBip32Derivation {
+func (i PsbtInputInfo) GetTaprootBip32Derivation() []*psbt.TaprootBip32Derivation {
 	return i.TaprootBip32Derivation
 }
 
-type psbtOutputInfo struct {
+type PsbtOutputInfo struct {
 	psbt.POutput
 }
 
-func (o psbtOutputInfo) GetTapInternalKey() []byte {
+func (o PsbtOutputInfo) GetTapInternalKey() []byte {
 	return o.TaprootInternalKey
 }
 
-func (o psbtOutputInfo) GetBip32Derivation() []*psbt.Bip32Derivation {
+func (o PsbtOutputInfo) GetBip32Derivation() []*psbt.Bip32Derivation {
 	return o.Bip32Derivation
 }
 
-func (o psbtOutputInfo) GetTaprootBip32Derivation() []*psbt.TaprootBip32Derivation {
+func (o PsbtOutputInfo) GetTaprootBip32Derivation() []*psbt.TaprootBip32Derivation {
 	return o.TaprootBip32Derivation
 }
 
 type OutputInfo interface {
-	psbtInputInfo | psbtOutputInfo
+	PsbtInputInfo | PsbtOutputInfo
 	GetBip32Derivation() []*psbt.Bip32Derivation
 	GetTapInternalKey() []byte
 	GetTaprootBip32Derivation() []*psbt.TaprootBip32Derivation
@@ -118,7 +118,7 @@ type OutputInfo interface {
 
 // Finds and extracts our key info in the segwit/taproot key infos. Returns nil if our key is not
 // present in the input/output.
-func findOurKey[O OutputInfo](ourRootFingerprint []byte, outputInfo O) (*ourKey, error) {
+func FindOurKey[O OutputInfo](ourRootFingerprint []byte, outputInfo O) (*OurKey, error) {
 	ourRootFingerPrintInt := binary.LittleEndian.Uint32(ourRootFingerprint)
 	for _, tapKey := range outputInfo.GetTaprootBip32Derivation() {
 		if ourRootFingerPrintInt == tapKey.MasterKeyFingerprint {
@@ -128,19 +128,19 @@ func findOurKey[O OutputInfo](ourRootFingerprint []byte, outputInfo O) (*ourKey,
 				if len(tapKey.LeafHashes) > 0 {
 					return nil, errp.New("same key in internal key and in leaf script not allowed")
 				}
-				return &ourKey{taprootInternal: &taprootInternal{TaprootBip32Derivation: tapKey}}, nil
+				return &OurKey{TaprootInternal: &taprootInternal{TaprootBip32Derivation: tapKey}}, nil
 			}
 			if len(tapKey.LeafHashes) != 1 {
 				return nil, errp.New("BIP-388 requires all pubkeys to be unique, but pubkeys is in multiple leaf scripts ")
 			}
-			return &ourKey{taprootScript: &taprootScript{TaprootBip32Derivation: tapKey}}, nil
+			return &OurKey{TaprootScript: &taprootScript{TaprootBip32Derivation: tapKey}}, nil
 		}
 	}
 
 	for _, derivation := range outputInfo.GetBip32Derivation() {
 		if ourRootFingerPrintInt == derivation.MasterKeyFingerprint {
 			// TODO: check for fingerprint collision
-			return &ourKey{segwit: derivation}, nil
+			return &OurKey{Segwit: derivation}, nil
 		}
 	}
 	return nil, nil
@@ -355,7 +355,7 @@ func handleOurOutput(
 	firmwareVersion *semver.SemVer,
 	options *PSBTSignOptions,
 	scriptConfigs []*messages.BTCScriptConfigWithKeypath,
-	ourKey *ourKey,
+	ourKey *OurKey,
 	psbtOutput psbt.POutput,
 	txOutput *wire.TxOut,
 ) (*messages.BTCScriptConfigWithKeypath, bool, error) {
@@ -407,7 +407,7 @@ func handleOurOutput(
 
 type psbtConvertResult struct {
 	tx                  *BTCTx
-	ourKeys             []*ourKey
+	ourKeys             []*OurKey
 	scriptConfigs       []*messages.BTCScriptConfigWithKeypath
 	outputScriptConfigs []*messages.BTCScriptConfigWithKeypath
 }
@@ -454,7 +454,7 @@ func newBTCTxFromPSBT(
 	}
 
 	numInputs := len(psbt_.UnsignedTx.TxIn)
-	ourKeys := make([]*ourKey, numInputs)
+	ourKeys := make([]*OurKey, numInputs)
 	inputs := make([]*BTCTxInput, numInputs)
 
 	for inputIndex, txInput := range psbt_.UnsignedTx.TxIn {
@@ -470,7 +470,7 @@ func newBTCTxFromPSBT(
 			return nil, errp.Newf("could not find utxo of input %d", inputIndex)
 		}
 
-		ourKey, err := findOurKey(ourRootFingerprint, psbtInputInfo{psbtInput})
+		ourKey, err := FindOurKey(ourRootFingerprint, PsbtInputInfo{psbtInput})
 		if err != nil {
 			return nil, err
 		}
@@ -530,7 +530,7 @@ func newBTCTxFromPSBT(
 			outputOptions = &PSBTSignOutputOptions{}
 		}
 
-		ourKey, err := findOurKey(ourRootFingerprint, psbtOutputInfo{psbtOutput})
+		ourKey, err := FindOurKey(ourRootFingerprint, PsbtOutputInfo{psbtOutput})
 		if err != nil {
 			return nil, err
 		}
@@ -641,20 +641,20 @@ func (device *Device) BTCSignPSBT(
 		signatureDER := ecdsa.NewSignature(r, s).Serialize()
 		ourKey := txResult.ourKeys[inputIndex]
 		switch {
-		case ourKey.segwit != nil:
+		case ourKey.Segwit != nil:
 			psbtInput.PartialSigs = []*psbt.PartialSig{
 				{
-					PubKey:    ourKey.segwit.PubKey,
+					PubKey:    ourKey.Segwit.PubKey,
 					Signature: append(signatureDER, byte(txscript.SigHashAll)),
 				},
 			}
-		case ourKey.taprootInternal != nil:
+		case ourKey.TaprootInternal != nil:
 			psbtInput.TaprootKeySpendSig = signatureCompact
-		case ourKey.taprootScript != nil:
+		case ourKey.TaprootScript != nil:
 			psbtInput.TaprootScriptSpendSig = []*psbt.TaprootScriptSpendSig{
 				{
-					XOnlyPubKey: ourKey.taprootScript.XOnlyPubKey,
-					LeafHash:    ourKey.taprootScript.LeafHashes[0],
+					XOnlyPubKey: ourKey.TaprootScript.XOnlyPubKey,
+					LeafHash:    ourKey.TaprootScript.LeafHashes[0],
 					Signature:   signatureCompact,
 					SigHash:     txscript.SigHashDefault,
 				},

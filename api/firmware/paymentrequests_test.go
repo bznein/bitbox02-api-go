@@ -3,6 +3,7 @@
 package firmware
 
 import (
+	"encoding/binary"
 	"encoding/base64"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 )
 
 func TestValidateSwapkitNearSignature(t *testing.T) {
-	sig, err := base64.StdEncoding.DecodeString("lkziB33Vbq2nv3GYrqBoRVJm3yWUW4NQ0CbOibOCEPQYM+2yZWbxo1EKc5xHHbk33j/OEBrrTBF2nzQOveGImg==")
+	sig, err := base64.StdEncoding.DecodeString("0sHo3wWNyavVaOgryHtgyps4bcBKBEh3kK8G8iTMLONHVazkTekd9bMOLA4IzcNJcdlrCrElcrj7L4sSvk6Ykg==")
 	if err != nil {
 		panic(err)
 	}
@@ -25,7 +26,7 @@ func TestValidateSwapkitNearSignature(t *testing.T) {
 				Memo: &messages.BTCPaymentRequestRequest_Memo_CoinPurchaseMemo_{
 					CoinPurchaseMemo: &messages.BTCPaymentRequestRequest_Memo_CoinPurchaseMemo{
 						CoinType: 0,
-						Amount:   "0.0014172 BTC",
+						Amount:   "0.03127916 BTC",
 						Address:  "bc1qsf4wt3v2gr0vyfngra8vvs4xlqrz8kelttmzp3",
 					},
 				},
@@ -35,25 +36,56 @@ func TestValidateSwapkitNearSignature(t *testing.T) {
 		Signature:   sig,
 	}
 
-	// big endian
-	//outputValue := unhex("0000000000000000000000000000000000000000000000000de0b6b3a7640000")
-	// little endian
-	outputValue := unhex("00e1f50500000000000000000000000000000000000000000000000000000000")
-	sighash, err := ComputePaymentRequestSighashBytes(
-		paymentRequest,
-		60,
-		outputValue,
-		"0xBc228f346b4bD50ED05366A3806591aFf4C6b924",
-	)
-	require.NoError(t, err)
+	pubkeys := []string{
+		"03098cba9cde720171796a5c58cb774b0cd19deb62e9b51df5967aefeba34632ff",
+		"02b985055ff600a6b1d30ddf6020693ce9fe8db55e5a0e27dc6144eb48040ce517",
+		"02bf5740a2b794b33d73358d7313e9cb260058f3ac6c886fcc388d9f3f0b48a90d",
+	}
 
-	pubKey, err := btcec.ParsePubKey(
-		unhex("02bf5740a2b794b33d73358d7313e9cb260058f3ac6c886fcc388d9f3f0b48a90d"))
-	require.NoError(t, err)
-	require.Truef(
-		t,
-		parseECDSASignature(t, paymentRequest.Signature).Verify(sighash, pubKey),
-		"SWAPKIT (NEAR) fixture signature failed verification for sighash %x",
-		sighash,
-	)
+	outputValueBigEndian := make([]byte, 32)
+	binary.BigEndian.PutUint64(outputValueBigEndian[24:], 1000000000000000000)
+
+	outputValueLittleEndian := make([]byte, 32)
+	binary.LittleEndian.PutUint64(outputValueLittleEndian, 1000000000000000000)
+
+	for _, tc := range []struct {
+		name        string
+		outputValue []byte
+	}{
+		{
+			name:        "big endian",
+			outputValue: outputValueBigEndian,
+		},
+		{
+			name:        "little endian",
+			outputValue: outputValueLittleEndian,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sighash, err := ComputePaymentRequestSighashBytes(
+				paymentRequest,
+				60,
+				tc.outputValue,
+				"0x05F0819b7e1683C4829B412f1862B4ECb3E503cE",
+			)
+			require.NoError(t, err)
+
+			matchCount := 0
+			for _, pubkeyHex := range pubkeys {
+				pubKey, err := btcec.ParsePubKey(unhex(pubkeyHex))
+				require.NoError(t, err)
+				if parseECDSASignature(t, paymentRequest.Signature).Verify(sighash, pubKey) {
+					matchCount++
+				}
+			}
+
+			require.Equalf(
+				t,
+				1,
+				matchCount,
+				"SWAPKIT (NEAR) fixture signature should verify against exactly one allowed signer for sighash %x",
+				sighash,
+			)
+		})
+	}
 }
